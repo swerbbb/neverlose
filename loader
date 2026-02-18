@@ -2083,20 +2083,3 @@ function OnHit(player)
 end
 
 _G.OmegaUltra = { OnMiss = OnMiss, OnHit = OnHit, GetTarget = GetTarget, Config = Cfg }
-
-print('[NEVERLOSE.WIN] Loaded  —  RightShift = Menu')
-print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-print('[✓] Clean script - No hooks, no interference')
-print('[✓] Aimbot + Auto Shoot + Ragebot')
-print('[✓] Kill notifications with custom text')
-print('[✓] World settings & visuals')
-print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
-print('[FEATURES]')
-print('  • Ragebot with auto-equip')
-print('  • Aimbot with prediction & resolver')  
-print('  • 30+ Strafe movement sliders')
-print('  • ESP with glow & highlights')
-print('  • Custom animations & emotes')
-print('  • Kill feed notifications')
-print('  • World lighting controls')
-print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
