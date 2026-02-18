@@ -193,9 +193,16 @@ local Cfg = {
     -- KILL NOTIFICATION
     KillNotif = {
         Enabled = true,
-        Text    = "eliminated {player}",  -- {player} gets replaced with victim name
+        Text    = "Killed {player} with {weapon} for {damage} damage",
         Duration= 3,
         Sound   = true,
+        SoundId = "6958727243",  -- Default kill sound
+        -- Kill GFX
+        ScreenFlash = true,
+        FlashColor  = Color3.fromRGB(255, 50, 50),
+        FlashDuration = 0.3,
+        ScreenShake = true,
+        ShakeIntensity = 5,
     },
 
     -- WORLD SETTINGS
@@ -546,16 +553,45 @@ end)
 -- ══════════════════════════════════════════════════════════════════════════
 local function EquipWeapon(name)
     if not Hum or not Char then return end
+    
+    -- Check if already equipped
     if Char:FindFirstChild(name) then return end
+    
+    -- Try to find exact match in backpack
     local tool = LP.Backpack:FindFirstChild(name)
-    if tool then
-        pcall(function() Hum:EquipTool(tool) end)
-        return
+    if tool and tool:IsA("Tool") then
+        local success = pcall(function() 
+            Hum:EquipTool(tool) 
+        end)
+        if success then return end
     end
+    
+    -- Try partial match (case insensitive)
     for _, t in ipairs(LP.Backpack:GetChildren()) do
         if t:IsA("Tool") and t.Name:lower():find(name:lower()) then
-            pcall(function() Hum:EquipTool(t) end)
-            return
+            local success = pcall(function() 
+                Hum:EquipTool(t) 
+            end)
+            if success then return end
+        end
+    end
+    
+    -- Classic Duels fallback: try PlayerGui for tool references
+    local playerGui = LP:FindFirstChild("PlayerGui")
+    if playerGui then
+        local hotbar = playerGui:FindFirstChild("Hotbar")
+        if hotbar then
+            -- Try to trigger tool equip via hotbar
+            for _, frame in ipairs(hotbar:GetDescendants()) do
+                if frame:IsA("TextButton") and frame.Name:lower():find(name:lower()) then
+                    pcall(function()
+                        for _, connection in pairs(getconnections(frame.MouseButton1Click)) do
+                            connection:Fire()
+                        end
+                    end)
+                    return
+                end
+            end
         end
     end
 end
@@ -1245,10 +1281,77 @@ local function StopAnim()
 end
 
 -- ══════════════════════════════════════════════════════════════════════════
---  KILL NOTIFICATION
+--  KILL NOTIFICATION WITH GFX
 -- ══════════════════════════════════════════════════════════════════════════
 local LastKills = {}
+local LastWeaponUsed = "Gun"
 
+-- Track current weapon
+local function TrackWeapon()
+    if Char then
+        if Char:FindFirstChild("Gun") then
+            LastWeaponUsed = "Gun"
+        elseif Char:FindFirstChild("Knife") then
+            LastWeaponUsed = "Knife"
+        end
+    end
+end
+
+-- Screen Flash GFX
+local function ScreenFlash()
+    if not Cfg.KillNotif.ScreenFlash then return end
+    
+    local flash = Instance.new("ColorCorrectionEffect")
+    flash.TintColor = Cfg.KillNotif.FlashColor
+    flash.Brightness = 0.3
+    flash.Contrast = 0.2
+    flash.Parent = game.Lighting
+    
+    local duration = Cfg.KillNotif.FlashDuration
+    
+    -- Fade out
+    TweenSvc:Create(flash, TweenInfo.new(duration), {
+        Brightness = 0,
+        Contrast = 0
+    }):Play()
+    
+    game:GetService("Debris"):AddItem(flash, duration + 0.1)
+end
+
+-- Screen Shake GFX
+local function ScreenShake()
+    if not Cfg.KillNotif.ScreenShake then return end
+    
+    local intensity = Cfg.KillNotif.ShakeIntensity
+    local shakeTime = 0.3
+    local elapsed = 0
+    
+    local originalCF = Camera.CFrame
+    
+    local shake = RunService.RenderStepped:Connect(function(dt)
+        elapsed += dt
+        if elapsed >= shakeTime then
+            return
+        end
+        
+        local progress = elapsed / shakeTime
+        local currentIntensity = intensity * (1 - progress)
+        
+        local randomOffset = Vector3.new(
+            (math.random() - 0.5) * currentIntensity,
+            (math.random() - 0.5) * currentIntensity,
+            (math.random() - 0.5) * currentIntensity
+        ) / 10
+        
+        Camera.CFrame = Camera.CFrame * CFrame.new(randomOffset)
+    end)
+    
+    task.delay(shakeTime, function()
+        if shake then shake:Disconnect() end
+    end)
+end
+
+-- Check for kills
 local function CheckKills()
     if not Cfg.KillNotif.Enabled then return end
     if not LP:FindFirstChild("leaderstats") then return end
@@ -1261,18 +1364,35 @@ local function CheckKills()
     
     if currentKills > lastKills then
         -- We got a kill!
-        local text = Cfg.KillNotif.Text:gsub("{player}", State.CurrentTarget and State.CurrentTarget.Name or "enemy")
+        TrackWeapon()
         
+        local target = GetTarget()
+        local playerName = target and target.Name or "Enemy"
+        local weapon = LastWeaponUsed
+        local damage = weapon == "Gun" and "100" or "75"  -- Estimate
+        
+        -- Replace placeholders
+        local text = Cfg.KillNotif.Text
+        text = text:gsub("{player}", playerName)
+        text = text:gsub("{weapon}", weapon)
+        text = text:gsub("{damage}", damage)
+        
+        -- Show notification
         Library:Notify(text, Cfg.KillNotif.Duration)
         
+        -- Play sound
         if Cfg.KillNotif.Sound then
             local sound = Instance.new("Sound")
-            sound.SoundId = "rbxassetid://6958727243"
+            sound.SoundId = "rbxassetid://" .. Cfg.KillNotif.SoundId
             sound.Volume = 0.5
             sound.Parent = game:GetService("SoundService")
             sound:Play()
             game:GetService("Debris"):AddItem(sound, 2)
         end
+        
+        -- Apply GFX
+        ScreenFlash()
+        ScreenShake()
     end
     
     LastKills[LP.UserId] = currentKills
@@ -1796,38 +1916,97 @@ WR:AddToggle('KillNotif', {
     Text='Kill Notifications', Default=true,
     Callback=function(v) Cfg.KillNotif.Enabled = v end
 })
+
+WR:AddLabel('Notification Text:')
+WR:AddLabel('Use: {player} {weapon} {damage}')
 WR:AddInput('KillNotifText', {
-    Default = 'eliminated {player}',
+    Default = 'Killed {player} with {weapon} for {damage} damage',
     Text = 'Notification Text',
-    Tooltip = 'Use {player} for victim name',
-    Placeholder = 'eliminated {player}',
+    Tooltip = 'Placeholders: {player} {weapon} {damage}',
+    Placeholder = 'Killed {player} with {weapon}',
     Callback = function(v)
         if v and #v > 0 then
             Cfg.KillNotif.Text = v
         end
     end
 })
+
 WR:AddSlider('KillNotifDuration', {
     Text='Display Duration (s)', Default=3, Min=1, Max=10, Rounding=0,
     Callback=function(v) Cfg.KillNotif.Duration = v end
 })
+
+WR:AddDivider()
+WR:AddLabel('Sound Settings:')
 WR:AddToggle('KillNotifSound', {
-    Text='Play Sound', Default=true,
+    Text='Play Kill Sound', Default=true,
     Callback=function(v) Cfg.KillNotif.Sound = v end
 })
+
+WR:AddInput('KillSoundID', {
+    Default = '6958727243',
+    Numeric = true,
+    Finished = true,
+    Text = 'Kill Sound ID',
+    Tooltip = 'Roblox audio asset ID',
+    Placeholder = '6958727243',
+    Callback = function(v)
+        if v and #v > 0 then
+            Cfg.KillNotif.SoundId = v
+        end
+    end
+})
+
+WR:AddDivider()
+WR:AddLabel('Kill GFX:')
+WR:AddToggle('ScreenFlash', {
+    Text='Screen Flash', Default=true,
+    Callback=function(v) Cfg.KillNotif.ScreenFlash = v end
+})
+
+WR:AddLabel('Flash Color:'):AddColorPicker('FlashColor', {
+    Default=Color3.fromRGB(255, 50, 50),
+    Title='Flash Color',
+    Callback=function(v) Cfg.KillNotif.FlashColor = v end
+})
+
+WR:AddSlider('FlashDuration', {
+    Text='Flash Duration (s)', Default=3, Min=1, Max=10, Rounding=1,
+    Callback=function(v) Cfg.KillNotif.FlashDuration = v / 10 end
+})
+
+WR:AddToggle('ScreenShake', {
+    Text='Screen Shake', Default=true,
+    Callback=function(v) Cfg.KillNotif.ScreenShake = v end
+})
+
+WR:AddSlider('ShakeIntensity', {
+    Text='Shake Intensity', Default=5, Min=1, Max=20, Rounding=0,
+    Callback=function(v) Cfg.KillNotif.ShakeIntensity = v end
+})
+
+WR:AddDivider()
 WR:AddButton({
-    Text='Test Notification',
+    Text='Test Kill Notification',
     Func=function()
-        local text = Cfg.KillNotif.Text:gsub("{player}", "TestPlayer123")
+        local text = Cfg.KillNotif.Text
+        text = text:gsub("{player}", "TestPlayer123")
+        text = text:gsub("{weapon}", "Gun")
+        text = text:gsub("{damage}", "100")
+        
         Library:Notify(text, Cfg.KillNotif.Duration)
+        
         if Cfg.KillNotif.Sound then
             local sound = Instance.new("Sound")
-            sound.SoundId = "rbxassetid://6958727243"
+            sound.SoundId = "rbxassetid://" .. Cfg.KillNotif.SoundId
             sound.Volume = 0.5
             sound.Parent = game:GetService("SoundService")
             sound:Play()
             game:GetService("Debris"):AddItem(sound, 2)
         end
+        
+        ScreenFlash()
+        ScreenShake()
     end
 })
 
@@ -1904,3 +2083,20 @@ function OnHit(player)
 end
 
 _G.OmegaUltra = { OnMiss = OnMiss, OnHit = OnHit, GetTarget = GetTarget, Config = Cfg }
+
+print('[NEVERLOSE.WIN] Loaded  —  RightShift = Menu')
+print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+print('[✓] Clean script - No hooks, no interference')
+print('[✓] Aimbot + Auto Shoot + Ragebot')
+print('[✓] Kill notifications with custom text')
+print('[✓] World settings & visuals')
+print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
+print('[FEATURES]')
+print('  • Ragebot with auto-equip')
+print('  • Aimbot with prediction & resolver')  
+print('  • 30+ Strafe movement sliders')
+print('  • ESP with glow & highlights')
+print('  • Custom animations & emotes')
+print('  • Kill feed notifications')
+print('  • World lighting controls')
+print('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
